@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 class CameraService {
   CameraController? _controller;
   CameraController? get controller => _controller;
+  CameraDescription? get cameraDescription => _controller?.description;
   bool _isStreaming = false;
 
   Future<void> initialize() async {
@@ -20,9 +21,9 @@ class CameraService {
     //  Initialize the controller with high resolution and no audio
     _controller = CameraController(
       frontCamera,
-      ResolutionPreset.high,
+      ResolutionPreset.medium,
       enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.yuv420, // Android standard
+      imageFormatGroup: ImageFormatGroup.nv21, // Android standard
     );
 
     await _controller!.initialize();
