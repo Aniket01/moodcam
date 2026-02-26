@@ -3,6 +3,7 @@ import 'package:camera/camera.dart';
 class CameraService {
   CameraController? _controller;
   CameraController? get controller => _controller;
+  bool _isStreaming = false;
 
   Future<void> initialize() async {
     if (_controller != null) return;
@@ -27,7 +28,24 @@ class CameraService {
     await _controller!.initialize();
   }
 
-  void dispose() {
+  void startStream(Function(CameraImage) onImage) {
+    if (_controller == null ||
+        !_controller!.value.isInitialized ||
+        _isStreaming) {
+      return;
+    }
+    _isStreaming = true;
+    _controller!.startImageStream(onImage);
+  }
+
+  Future<void> stopStream() async {
+    if (_controller == null || !_isStreaming) return;
+    _isStreaming = false;
+    await _controller!.stopImageStream();
+  }
+
+  void dispose() async {
+    await stopStream();
     _controller?.dispose();
     _controller = null;
   }
