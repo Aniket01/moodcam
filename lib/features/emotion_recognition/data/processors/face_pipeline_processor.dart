@@ -12,12 +12,28 @@ class FacePipelineProcessor {
   bool get isProcessing => _isProcessing;
 
   final Function(List<double> blendshapes)? onBlendshapesOutput;
+
+  /// Called after TFLite inference with both the 52 blendshape scores and the
+  /// full 478-point [x, y] landmark list in pixel coordinates, plus the
+  /// image dimensions needed to normalise landmarks.
+  final void Function(
+    List<double> blendshapes,
+    List<List<double>> landmarks,
+    int imageWidth,
+    int imageHeight,
+  )?
+  onAnalysisResult;
+
   final VoidCallback? onFrameDropped;
 
   late final FaceMeshDetector _meshDetector;
   late final Interpreter _blendShapes;
 
-  FacePipelineProcessor({this.onBlendshapesOutput, this.onFrameDropped});
+  FacePipelineProcessor({
+    this.onBlendshapesOutput,
+    this.onAnalysisResult,
+    this.onFrameDropped,
+  });
 
   Future<void> initialize() async {
     _meshDetector = FaceMeshDetector(option: FaceMeshDetectorOptions.faceMesh);
@@ -42,6 +58,9 @@ class FacePipelineProcessor {
       // Convert CameraImage → InputImage (NV21)
       final inputImage = _toInputImage(image, camera);
       if (inputImage == null) {
+        debugPrint(
+          '[Pipeline] ⚠️ _toInputImage returned null — unsupported rotation or format',
+        );
         _isProcessing = false;
         onFrameDropped?.call();
         return;
@@ -50,6 +69,9 @@ class FacePipelineProcessor {
       // Run ML Kit Face Mesh
       final meshes = await _meshDetector.processImage(inputImage);
       if (meshes.isEmpty) {
+        debugPrint(
+          '[Pipeline] 🔍 ML Kit: no face meshes detected in this frame',
+        );
         _isProcessing = false;
         onFrameDropped?.call();
         return;
@@ -58,8 +80,18 @@ class FacePipelineProcessor {
       final FaceMesh mesh = meshes.first;
       final List<FaceMeshPoint> pts = mesh.points;
 
+      debugPrint(
+        '[Pipeline] 🟢 ML Kit: ${pts.length} landmarks — '
+        'bbox: left=${mesh.boundingBox.left.toStringAsFixed(1)}, '
+        'top=${mesh.boundingBox.top.toStringAsFixed(1)}, '
+        'w=${mesh.boundingBox.width.toStringAsFixed(1)}, '
+        'h=${mesh.boundingBox.height.toStringAsFixed(1)}',
+      );
+
       if (pts.length < 468) {
-        debugPrint('ML Kit returned ${pts.length} points (expected 468)');
+        debugPrint(
+          '[Pipeline] ⚠️ ML Kit returned only ${pts.length} points (expected ≥468), dropping frame',
+        );
         _isProcessing = false;
         onFrameDropped?.call();
         return;
@@ -80,8 +112,8 @@ class FacePipelineProcessor {
       _synthesizeIris(all478, kLeftEyeContour, 473); // left iris 473-477
 
       // Select the 146-landmark subset & normalize to [0, 1]
-      final double imgW = image.width.toDouble();
-      final double imgH = image.height.toDouble();
+      final int imgW = image.width;
+      final int imgH = image.height;
 
       final Float32List bsInput = Float32List(1 * 146 * 2);
       for (int i = 0; i < 146; i++) {
@@ -94,15 +126,27 @@ class FacePipelineProcessor {
       final output = List<double>.filled(52, 0.0);
       _blendShapes.run(bsInput.reshape([1, 146, 2]), output);
 
-      final result = output.map((v) => (v as num).toDouble()).toList();
+      final blendshapes = output.map((v) => (v as num).toDouble()).toList();
+
+      // Debug: log a min/max summary of TFLite output
+      final double bsMin = blendshapes.reduce((a, b) => a < b ? a : b);
+      final double bsMax = blendshapes.reduce((a, b) => a > b ? a : b);
+      debugPrint(
+        '[Pipeline] 🧠 TFLite blendshapes — '
+        'min: ${bsMin.toStringAsFixed(3)}, max: ${bsMax.toStringAsFixed(3)}, '
+        'BS[0-4]: ${blendshapes.take(5).map((v) => v.toStringAsFixed(3)).join(', ')}',
+      );
 
       _isProcessing = false;
-      onBlendshapesOutput?.call(result);
 
-      // TODO: Implement the logic to map blendshapes to emotions
+      // Notify blendshape-only listener (kept for backward compatibility)
+      onBlendshapesOutput?.call(blendshapes);
+
+      // Notify analysis listener with full landmark set + image dimensions
+      onAnalysisResult?.call(blendshapes, all478, imgW, imgH);
     } catch (e, stack) {
       _isProcessing = false;
-      debugPrint('❌ Pipeline error: $e\n$stack');
+      debugPrint('[Pipeline] ❌ processFrame error: $e\n$stack');
       onFrameDropped?.call();
     }
   }
