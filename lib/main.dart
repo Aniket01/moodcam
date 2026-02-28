@@ -6,7 +6,7 @@ void main() {
   // Ensure the native bridge is initialized before using the camera
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Lock the app to portrait mode (Face detection models prefer upright images)
+  // Lock app to portrait mode
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,

@@ -2,7 +2,6 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import '../../data/services/camera_service.dart';
 import '../../data/services/face_detection_service.dart';
-import '../../../../core/utils/image_converter.dart';
 
 class PipelineController extends ChangeNotifier {
   final CameraService _cameraService;
@@ -11,9 +10,8 @@ class PipelineController extends ChangeNotifier {
   bool isProcessing = false;
   int frameCount = 0;
   DateTime? _lastFrameTime;
-  DateTime? _lastProcessTime; // <-- new
-  final int minProcessingIntervalMs =
-      100; // target ~10 FPS (tune: 66 for ~15fps)
+  DateTime? _lastProcessTime;
+  final int minProcessingIntervalMs = 100;
 
   double currentFps = 0.0;
 
@@ -40,7 +38,7 @@ class PipelineController extends ChangeNotifier {
           final diff = now.difference(_lastFrameTime!).inMilliseconds;
           if (diff > 0) {
             currentFps = 1000 / diff;
-            notifyListeners(); // Tell the UI to update the FPS text
+            notifyListeners(); // Update UI
           }
         }
         _lastFrameTime = now;
@@ -49,32 +47,13 @@ class PipelineController extends ChangeNotifier {
         final cameraDesc = _cameraService.cameraDescription;
 
         if (cameraDesc != null) {
-          // convert raw bytes to ML kit format
-          final inputImage = ImageConverter.convertCameraImage(
-            image,
-            cameraDesc,
-          );
-
           // detect face
-          if (inputImage != null) {
-            final face = await _faceDetectionService.detectFace(inputImage);
-            if (kDebugMode) {
-              if (face != null) {
-                print(
-                  '✅ Face found at: ${face.boundingBox} | FPS: ${currentFps.toStringAsFixed(1)}',
-                );
-              } else {
-                print(
-                  '⚠️ No single face detected. | FPS: ${currentFps.toStringAsFixed(1)}',
-                );
-              }
-            }
-          } else {
-            if (kDebugMode) {
-              print(
-                '❌ InputImage conversion failed for frame $frameCount | FPS: ${currentFps.toStringAsFixed(1)}',
-              );
-            }
+          await _faceDetectionService.detectFace(image);
+
+          if (kDebugMode) {
+            print(
+              'Face detection is currently disabled (ML Kit removed). | FPS: ${currentFps.toStringAsFixed(1)}',
+            );
           }
         } else {
           if (kDebugMode) print('❌ Camera description is null');

@@ -1,6 +1,6 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
-import 'package:moodcam/features/emotion_recognition/presentation/widgets/face_guide_painter.dart';
+//import 'package:moodcam/features/emotion_recognition/presentation/widgets/face_guide_painter.dart';
 import '../../data/services/camera_service.dart';
 import '../state/pipeline_controller.dart';
 
@@ -94,6 +94,9 @@ class _CameraFERScreenState extends State<CameraFERScreen>
               ),
             ),
 
+            /* 
+            Add later once the core functionality is working
+
             // Face Guide Overlay
             Positioned.fill(child: CustomPaint(painter: FaceGuidePainter())),
 
@@ -134,7 +137,8 @@ class _CameraFERScreenState extends State<CameraFERScreen>
                   style: TextStyle(color: Colors.green, fontSize: 24),
                 ),
               ),
-            ),
+            ), 
+            */
           ],
         ),
       ),
