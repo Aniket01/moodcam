@@ -28,6 +28,9 @@ class _CameraFERScreenState extends State<CameraFERScreen>
   Future<void> _initCameraAndStream() async {
     try {
       await _cameraService.initialize();
+      // Initialize the Isolate processor before starting the stream
+      await _pipelineController.initializeProcessor();
+
       if (mounted) {
         setState(() {
           _isCameraInitialized = true;
@@ -94,51 +97,90 @@ class _CameraFERScreenState extends State<CameraFERScreen>
               ),
             ),
 
-            /* 
+            /*
             Add later once the core functionality is working
 
             // Face Guide Overlay
             Positioned.fill(child: CustomPaint(painter: FaceGuidePainter())),
 
-            // FPS meter
+            */
+
+            // FPS + face-detection status overlay
             Positioned(
               top: 20,
               left: 20,
               child: ListenableBuilder(
                 listenable: _pipelineController,
                 builder: (context, _) {
+                  final detected = _pipelineController.faceDetected;
+                  final bs = _pipelineController.currentBlendshapes;
+                  final String bsOutput = bs.length >= 5
+                      ? bs.take(5).map((e) => e.toStringAsFixed(3)).join(', ')
+                      : '—';
+
                   return Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 12,
-                      vertical: 6,
+                      vertical: 8,
                     ),
                     decoration: BoxDecoration(
                       color: Colors.black87,
                       borderRadius: BorderRadius.circular(8),
                     ),
-                    child: Text(
-                      'FPS: ${_pipelineController.currentFps.toStringAsFixed(1)}',
-                      style: const TextStyle(
-                        color: Colors.greenAccent,
-                        fontSize: 16,
-                        fontWeight: FontWeight.bold,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // FPS
+                        Text(
+                          'FPS: ${_pipelineController.currentFps.toStringAsFixed(1)}',
+                          style: const TextStyle(
+                            color: Colors.greenAccent,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        // Face detection status
+                        Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              detected ? Icons.face : Icons.face_retouching_off,
+                              color: detected
+                                  ? Colors.greenAccent
+                                  : Colors.redAccent,
+                              size: 18,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              detected ? 'Face Detected' : 'No Face',
+                              style: TextStyle(
+                                color: detected
+                                    ? Colors.greenAccent
+                                    : Colors.redAccent,
+                                fontSize: 14,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                        // Blendshape values (only when face is present)
+                        if (detected) ...[
+                          const SizedBox(height: 4),
+                          Text(
+                            'BS [0-4]: $bsOutput',
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   );
                 },
               ),
             ),
-
-            // Placeholder for ML overlays (Bounding boxes, text) Custom paint widget
-            const Positioned.fill(
-              child: Center(
-                child: Text(
-                  'ML Overlay Placeholder',
-                  style: TextStyle(color: Colors.green, fontSize: 24),
-                ),
-              ),
-            ), 
-            */
           ],
         ),
       ),

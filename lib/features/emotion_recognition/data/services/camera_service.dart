@@ -21,7 +21,7 @@ class CameraService {
     //  Initialize the controller with high resolution and no audio
     _controller = CameraController(
       frontCamera,
-      ResolutionPreset.high,
+      ResolutionPreset.medium,
       enableAudio: false,
       imageFormatGroup: ImageFormatGroup.yuv420,
     );
