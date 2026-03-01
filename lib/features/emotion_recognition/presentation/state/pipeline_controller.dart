@@ -20,24 +20,16 @@ class PipelineController extends ChangeNotifier {
 
   double currentFps = 0.0;
   bool faceDetected = false;
-  List<double> currentBlendshapes = [];
 
   /// Latest analysis result from the engine; null before the first face frame.
   AnalysisResult? currentAnalysis;
 
   PipelineController(this._cameraService) {
     _facePipelineProcessor = FacePipelineProcessor(
-      onBlendshapesOutput: (blendshapes) {
-        // Kept for backward compatibility — UI can still read raw blendshapes.
-        currentBlendshapes = blendshapes;
-        faceDetected = true;
-        // notifyListeners() is called from onAnalysisResult below.
-      },
-
-      onAnalysisResult: (blendshapes, landmarks, imgW, imgH) {
+      onAnalysisResult: (ferEmotions, landmarks, imgW, imgH) {
         try {
           final result = _analysisEngine.analyze(
-            blendshapes: blendshapes,
+            ferEmotions: ferEmotions,
             landmarks: landmarks,
             imageWidth: imgW,
             imageHeight: imgH,
@@ -48,9 +40,8 @@ class PipelineController extends ChangeNotifier {
           debugPrint(
             '[Controller] 🎭 Analysis — '
             'emotion: ${result.emotion}, '
-            'fatigue: ${result.fatigueScore.toStringAsFixed(3)}, '
             'stress: ${result.stressScore.toStringAsFixed(3)}, '
-            'baseline: ${result.isBaselineReady ? "ready" : "calibrating (${_analysisEngine.baselineFrames - (result.metrics['windowLen'] ?? 0).round()} frames left)"}',
+            'baseline: ${result.isBaselineReady ? "ready" : "calibrating"}',
           );
         } catch (e, stack) {
           debugPrint(
@@ -62,8 +53,6 @@ class PipelineController extends ChangeNotifier {
 
       onFrameDropped: () {
         if (faceDetected) {
-          // Face was visible before — reset the personal baseline so the engine
-          // starts fresh when the face reappears (e.g. after the user looks away).
           _analysisEngine.resetBaseline();
           debugPrint('[Controller] 👤 Face lost — baseline reset');
         }
@@ -85,8 +74,6 @@ class PipelineController extends ChangeNotifier {
     _cameraService.startStream((CameraImage image) async {
       final now = DateTime.now();
 
-      // FPS Calculation — runs on every camera callback BEFORE throttle guards
-      // so we measure the true camera delivery rate.
       if (_rawFrameTime != null) {
         final diff = now.difference(_rawFrameTime!).inMilliseconds;
         if (diff > 0) {
@@ -95,13 +82,11 @@ class PipelineController extends ChangeNotifier {
       }
       _rawFrameTime = now;
 
-      // Throttle gate: enforce minimum time between processed frames
       if (_lastProcessTime != null) {
         final sinceLast = now.difference(_lastProcessTime!).inMilliseconds;
         if (sinceLast < minProcessingIntervalMs) return;
       }
 
-      // Drop gate: skip if the processor is still crunching the last frame
       if (_facePipelineProcessor.isProcessing) return;
       _lastProcessTime = now;
 
@@ -109,7 +94,6 @@ class PipelineController extends ChangeNotifier {
         final cameraDesc = _cameraService.cameraDescription;
 
         if (cameraDesc != null) {
-          // Process frame (ML Kit Face Mesh → BlendShapes TFLite → Analysis)
           await _facePipelineProcessor.processFrame(image, cameraDesc);
           frameCount++;
           notifyListeners();

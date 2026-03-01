@@ -2,22 +2,76 @@ import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_mesh_detection/google_mlkit_face_mesh_detection.dart';
-import 'package:moodcam/core/constants/k_blendshape_landmark_indices.dart';
 import 'package:moodcam/core/constants/k_left_eye_contour.dart';
 import 'package:moodcam/core/constants/k_right_eye_contour.dart';
 import 'package:tflite_flutter/tflite_flutter.dart';
+import 'package:image/image.dart' as img;
+import 'dart:math' as math;
+import 'dart:isolate';
+
+// ----------------------------------------------------------------------------
+// Isolate Payload Structures
+// ----------------------------------------------------------------------------
+
+class IsolateInitData {
+  final SendPort sendPort;
+  final Uint8List ferModel;
+
+  IsolateInitData(this.sendPort, this.ferModel);
+}
+
+class IsolateFrameData {
+  // Raw CameraImage planar data
+  final List<Uint8List> planeBytes;
+  final List<int> planeBytesPerRow;
+  final List<int?> planeBytesPerPixel;
+
+  final int width;
+  final int height;
+  final ImageFormatGroup format;
+
+  // Face bounding box & landmarks
+  final Rect boundingBox;
+  final List<List<double>> landmarks478;
+
+  IsolateFrameData({
+    required this.planeBytes,
+    required this.planeBytesPerRow,
+    required this.planeBytesPerPixel,
+    required this.width,
+    required this.height,
+    required this.format,
+    required this.boundingBox,
+    required this.landmarks478,
+  });
+}
+
+class IsolateResultData {
+  final List<double> ferEmotions;
+  final int imageWidth;
+  final int imageHeight;
+  final List<List<double>> landmarks478;
+
+  IsolateResultData(
+    this.ferEmotions,
+    this.imageWidth,
+    this.imageHeight,
+    this.landmarks478,
+  );
+}
+
+// ----------------------------------------------------------------------------
+// FacePipelineProcessor
+// ----------------------------------------------------------------------------
 
 class FacePipelineProcessor {
   bool _isProcessing = false;
   bool get isProcessing => _isProcessing;
 
-  final Function(List<double> blendshapes)? onBlendshapesOutput;
-
-  /// Called after TFLite inference with both the 52 blendshape scores and the
-  /// full 478-point [x, y] landmark list in pixel coordinates, plus the
-  /// image dimensions needed to normalise landmarks.
+  /// Called after FER + ML Kit inference with the 7-class emotion probabilities,
+  /// full 478-point [x, y] landmark list in pixel coordinates, plus image dims.
   final void Function(
-    List<double> blendshapes,
+    List<double> ferEmotions,
     List<List<double>> landmarks,
     int imageWidth,
     int imageHeight,
@@ -27,27 +81,53 @@ class FacePipelineProcessor {
   final VoidCallback? onFrameDropped;
 
   late final FaceMeshDetector _meshDetector;
-  late final Interpreter _blendShapes;
 
-  FacePipelineProcessor({
-    this.onBlendshapesOutput,
-    this.onAnalysisResult,
-    this.onFrameDropped,
-  });
+  // Isolate Management
+  Isolate? _tfliteIsolate;
+  SendPort? _isolateSendPort;
+  late final ReceivePort _mainReceivePort;
+
+  FacePipelineProcessor({this.onAnalysisResult, this.onFrameDropped});
 
   Future<void> initialize() async {
     _meshDetector = FaceMeshDetector(option: FaceMeshDetectorOptions.faceMesh);
 
-    final bytes = (await rootBundle.load(
-      'assets/models/blendShapes.tflite',
+    // Read YOLO FER int8 model bytes
+    final ferBytes = (await rootBundle.load(
+      'assets/models/yolo_fer_int8.tflite',
     )).buffer.asUint8List();
-    _blendShapes = Interpreter.fromBuffer(bytes);
 
-    debugPrint(
-      'BlendShapes model loaded — '
-      'input: ${_blendShapes.getInputTensors().map((t) => t.shape)}, '
-      'output: ${_blendShapes.getOutputTensors().map((t) => t.shape)}',
+    // Setup communication port
+    _mainReceivePort = ReceivePort();
+    _mainReceivePort.listen(_handleIsolateMessage);
+
+    // Spawn Isolate
+    _tfliteIsolate = await Isolate.spawn(
+      _tfliteIsolateEntry,
+      IsolateInitData(_mainReceivePort.sendPort, ferBytes),
     );
+
+    debugPrint('✅ Isolate spawned — YOLO FER int8 model loaded.');
+  }
+
+  void _handleIsolateMessage(dynamic message) {
+    if (message is SendPort) {
+      _isolateSendPort = message;
+      debugPrint('[Pipeline] 🟢 Isolate SendPort received.');
+    } else if (message is IsolateResultData) {
+      _isProcessing = false;
+
+      onAnalysisResult?.call(
+        message.ferEmotions,
+        message.landmarks478,
+        message.imageWidth,
+        message.imageHeight,
+      );
+    } else if (message == "ERROR") {
+      _isProcessing = false;
+      debugPrint('[Pipeline] ❌ Isolate returned error.');
+      onFrameDropped?.call();
+    }
   }
 
   Future<void> processFrame(CameraImage image, CameraDescription camera) async {
@@ -58,9 +138,6 @@ class FacePipelineProcessor {
       // Convert CameraImage → InputImage (NV21)
       final inputImage = _toInputImage(image, camera);
       if (inputImage == null) {
-        debugPrint(
-          '[Pipeline] ⚠️ _toInputImage returned null — unsupported rotation or format',
-        );
         _isProcessing = false;
         onFrameDropped?.call();
         return;
@@ -69,9 +146,6 @@ class FacePipelineProcessor {
       // Run ML Kit Face Mesh
       final meshes = await _meshDetector.processImage(inputImage);
       if (meshes.isEmpty) {
-        debugPrint(
-          '[Pipeline] 🔍 ML Kit: no face meshes detected in this frame',
-        );
         _isProcessing = false;
         onFrameDropped?.call();
         return;
@@ -80,70 +154,56 @@ class FacePipelineProcessor {
       final FaceMesh mesh = meshes.first;
       final List<FaceMeshPoint> pts = mesh.points;
 
-      debugPrint(
-        '[Pipeline] 🟢 ML Kit: ${pts.length} landmarks — '
-        'bbox: left=${mesh.boundingBox.left.toStringAsFixed(1)}, '
-        'top=${mesh.boundingBox.top.toStringAsFixed(1)}, '
-        'w=${mesh.boundingBox.width.toStringAsFixed(1)}, '
-        'h=${mesh.boundingBox.height.toStringAsFixed(1)}',
-      );
-
       if (pts.length < 468) {
-        debugPrint(
-          '[Pipeline] ⚠️ ML Kit returned only ${pts.length} points (expected ≥468), dropping frame',
-        );
         _isProcessing = false;
         onFrameDropped?.call();
         return;
       }
 
-      //  Build the full 478-point array (468 real + 10 iris synthesized)
-      //  Each point is [x, y] in pixel coordinates.
+      // Build the full 478-point array (468 real + 10 iris synthesized)
       final List<List<double>> all478 = List.generate(478, (i) {
         if (i < 468) {
           final p = pts[i];
           return [p.x.toDouble(), p.y.toDouble()];
         }
-        return [0.0, 0.0]; // placeholder, filled below
+        return [0.0, 0.0];
       });
 
-      // Synthesize iris points 468-477
-      _synthesizeIris(all478, kRightEyeContour, 468); // right iris 468-472
-      _synthesizeIris(all478, kLeftEyeContour, 473); // left iris 473-477
+      _synthesizeIris(all478, kRightEyeContour, 468);
+      _synthesizeIris(all478, kLeftEyeContour, 473);
 
-      // Select the 146-landmark subset & normalize to [0, 1]
       final int imgW = image.width;
       final int imgH = image.height;
 
-      final Float32List bsInput = Float32List(1 * 146 * 2);
-      for (int i = 0; i < 146; i++) {
-        final idx = kBlendshapeLandmarkIndices[i];
-        bsInput[i * 2] = all478[idx][0] / imgW;
-        bsInput[i * 2 + 1] = all478[idx][1] / imgH;
+      // Ensure Isolate is ready
+      if (_isolateSendPort == null) {
+        _isProcessing = false;
+        return;
       }
 
-      // Run BlendShapes TFLite
-      final output = List<double>.filled(52, 0.0);
-      _blendShapes.run(bsInput.reshape([1, 146, 2]), output);
+      // Serialize image plane buffers
+      List<Uint8List> planeBytes = [];
+      List<int> planeBytesPerRow = [];
+      List<int?> planeBytesPerPixel = [];
 
-      final blendshapes = output.map((v) => (v as num).toDouble()).toList();
+      for (var plane in image.planes) {
+        planeBytes.add(plane.bytes);
+        planeBytesPerRow.add(plane.bytesPerRow);
+        planeBytesPerPixel.add(plane.bytesPerPixel);
+      }
 
-      // Debug: log a min/max summary of TFLite output
-      final double bsMin = blendshapes.reduce((a, b) => a < b ? a : b);
-      final double bsMax = blendshapes.reduce((a, b) => a > b ? a : b);
-      debugPrint(
-        '[Pipeline] 🧠 TFLite blendshapes — '
-        'min: ${bsMin.toStringAsFixed(3)}, max: ${bsMax.toStringAsFixed(3)}, '
-        'BS[0-4]: ${blendshapes.take(5).map((v) => v.toStringAsFixed(3)).join(', ')}',
+      final isolatePayload = IsolateFrameData(
+        planeBytes: planeBytes,
+        planeBytesPerRow: planeBytesPerRow,
+        planeBytesPerPixel: planeBytesPerPixel,
+        width: imgW,
+        height: imgH,
+        format: image.format.group,
+        boundingBox: mesh.boundingBox,
+        landmarks478: all478,
       );
 
-      _isProcessing = false;
-
-      // Notify blendshape-only listener (kept for backward compatibility)
-      onBlendshapesOutput?.call(blendshapes);
-
-      // Notify analysis listener with full landmark set + image dimensions
-      onAnalysisResult?.call(blendshapes, all478, imgW, imgH);
+      _isolateSendPort!.send(isolatePayload);
     } catch (e, stack) {
       _isProcessing = false;
       debugPrint('[Pipeline] ❌ processFrame error: $e\n$stack');
@@ -152,13 +212,11 @@ class FacePipelineProcessor {
   }
 
   /// Synthesize 5 iris points (center + 4 cardinal) from eye contour.
-  /// Writes into [all478] at indices [startIdx] through [startIdx + 4].
   void _synthesizeIris(
     List<List<double>> all478,
     List<int> eyeContour,
     int startIdx,
   ) {
-    // Iris center = average of all contour points
     double cx = 0, cy = 0;
     for (final idx in eyeContour) {
       cx += all478[idx][0];
@@ -166,10 +224,8 @@ class FacePipelineProcessor {
     }
     cx /= eyeContour.length;
     cy /= eyeContour.length;
-    all478[startIdx] = [cx, cy]; // iris center
+    all478[startIdx] = [cx, cy];
 
-    // 4 cardinal points: right, top, left, bottom of iris
-    // Use contour extremes as approximations
     double minX = double.infinity, maxX = -double.infinity;
     double minY = double.infinity, maxY = -double.infinity;
     for (final idx in eyeContour) {
@@ -179,13 +235,12 @@ class FacePipelineProcessor {
       if (y < minY) minY = y;
       if (y > maxY) maxY = y;
     }
-    // Iris radius ≈ half the smaller eye dimension
     final double rx = (maxX - minX) / 4;
     final double ry = (maxY - minY) / 4;
-    all478[startIdx + 1] = [cx + rx, cy]; // right
-    all478[startIdx + 2] = [cx, cy - ry]; // top
-    all478[startIdx + 3] = [cx - rx, cy]; // left
-    all478[startIdx + 4] = [cx, cy + ry]; // bottom
+    all478[startIdx + 1] = [cx + rx, cy];
+    all478[startIdx + 2] = [cx, cy - ry];
+    all478[startIdx + 3] = [cx - rx, cy];
+    all478[startIdx + 4] = [cx, cy + ry];
   }
 
   /// Convert YUV420 to NV21
@@ -195,12 +250,10 @@ class FacePipelineProcessor {
     );
     if (rotation == null) return null;
 
-    // Build NV21 bytes from YUV420 planes
     final int w = image.width, h = image.height;
     final int ySize = w * h;
     final Uint8List nv21 = Uint8List(ySize + w * h ~/ 2);
 
-    // Y plane (row-by-row to skip padding)
     final yPlane = image.planes[0];
     for (int row = 0; row < h; row++) {
       nv21.setRange(
@@ -211,7 +264,6 @@ class FacePipelineProcessor {
       );
     }
 
-    // Interleave V, U into NV21 order
     final uPlane = image.planes[1];
     final vPlane = image.planes[2];
     int off = ySize;
@@ -237,6 +289,142 @@ class FacePipelineProcessor {
 
   void dispose() {
     _meshDetector.close();
-    _blendShapes.close();
+    _mainReceivePort.close();
+    _tfliteIsolate?.kill(priority: Isolate.immediate);
   }
+}
+
+// ----------------------------------------------------------------------------
+// Isolate Entry Point (runs entirely off the main thread)
+// ----------------------------------------------------------------------------
+
+void _tfliteIsolateEntry(IsolateInitData initData) {
+  final ReceivePort receivePort = ReceivePort();
+  final SendPort sendPort = initData.sendPort;
+
+  sendPort.send(receivePort.sendPort);
+
+  Interpreter? ferInterpreter;
+
+  try {
+    ferInterpreter = Interpreter.fromBuffer(initData.ferModel);
+  } catch (e) {
+    sendPort.send("ERROR");
+    return;
+  }
+
+  receivePort.listen((message) {
+    if (message is IsolateFrameData) {
+      try {
+        final imgW = message.width;
+        final imgH = message.height;
+        final all478 = message.landmarks478;
+
+        // FER Model Inference
+        List<double> ferEmotions = List<double>.filled(7, 0.0);
+        final croppedImg = _cropAndConvertFaceToImageIso(message);
+
+        if (croppedImg != null) {
+          final img.Image resizedImg = img.copyResize(
+            croppedImg,
+            width: 224,
+            height: 224,
+          );
+
+          // Int8 quantized model: raw uint8 pixel values (0–255)
+          final input = Uint8List(1 * 224 * 224 * 3);
+          int pixelIndex = 0;
+          for (int y = 0; y < 224; y++) {
+            for (int x = 0; x < 224; x++) {
+              final pixel = resizedImg.getPixel(x, y);
+              input[pixelIndex++] = pixel.r.toInt().clamp(0, 255);
+              input[pixelIndex++] = pixel.g.toInt().clamp(0, 255);
+              input[pixelIndex++] = pixel.b.toInt().clamp(0, 255);
+            }
+          }
+
+          // tflite_flutter auto-dequantizes int8 output → doubles
+          // Use List<double> directly and apply softmax over the logits
+          final rawOutput = List.generate(
+            1,
+            (_) => List<double>.filled(7, 0.0),
+          );
+          ferInterpreter!.run(input.reshape([1, 224, 224, 3]), rawOutput);
+
+          // Apply softmax to get probabilities
+          ferEmotions = _softmax(rawOutput[0]);
+        }
+
+        sendPort.send(IsolateResultData(ferEmotions, imgW, imgH, all478));
+      } catch (e) {
+        debugPrint('[Isolate] ❌ Inference error: $e');
+        sendPort.send("ERROR");
+      }
+    }
+  });
+}
+
+/// Softmax: convert raw logits → probabilities that sum to 1.0
+List<double> _softmax(List<double> logits) {
+  final double maxLogit = logits.reduce(math.max);
+  final List<double> exps = logits.map((v) => math.exp(v - maxLogit)).toList();
+  final double sumExps = exps.reduce((a, b) => a + b);
+  return exps.map((v) => v / sumExps).toList();
+}
+
+// Isolate helper: crop face region from raw plane bytes
+img.Image? _cropAndConvertFaceToImageIso(IsolateFrameData data) {
+  final bbox = data.boundingBox;
+  int startX = math.max(0, bbox.left.floor().clamp(0, data.width - 1));
+  int startY = math.max(0, bbox.top.floor().clamp(0, data.height - 1));
+  int endX = math.min(data.width, bbox.right.ceil().clamp(0, data.width));
+  int endY = math.min(data.height, bbox.bottom.ceil().clamp(0, data.height));
+  int cropW = endX - startX;
+  int cropH = endY - startY;
+
+  if (cropW <= 0 || cropH <= 0) return null;
+
+  final img.Image result = img.Image(width: cropW, height: cropH);
+
+  if (data.format == ImageFormatGroup.yuv420) {
+    final int uvRowStride = data.planeBytesPerRow[1];
+    final int uvPixelStride = data.planeBytesPerPixel[1] ?? 1;
+
+    for (int y = 0; y < cropH; y++) {
+      int imgY = startY + y;
+      int pY = imgY * data.planeBytesPerRow[0] + startX;
+      int pUV = (imgY >> 1) * uvRowStride + (startX >> 1) * uvPixelStride;
+
+      for (int x = 0; x < cropW; x++) {
+        final int yValue = data.planeBytes[0][pY++];
+        final int uValue = data.planeBytes[1][pUV];
+        final int vValue = data.planeBytes[2][pUV];
+
+        if ((startX + x) % 2 == 1) pUV += uvPixelStride;
+
+        int r = (yValue + 1.370705 * (vValue - 128)).round().clamp(0, 255);
+        int g = (yValue - 0.337633 * (uValue - 128) - 0.698001 * (vValue - 128))
+            .round()
+            .clamp(0, 255);
+        int b = (yValue + 1.732446 * (uValue - 128)).round().clamp(0, 255);
+
+        result.setPixelRgb(x, y, r, g, b);
+      }
+    }
+  } else if (data.format == ImageFormatGroup.bgra8888) {
+    for (int y = 0; y < cropH; y++) {
+      int imgY = startY + y;
+      int p = (imgY * data.planeBytesPerRow[0]) + (startX * 4);
+      for (int x = 0; x < cropW; x++) {
+        int b = data.planeBytes[0][p++];
+        int g = data.planeBytes[0][p++];
+        int r = data.planeBytes[0][p++];
+        p++; // skip alpha
+        result.setPixelRgb(x, y, r, g, b);
+      }
+    }
+  } else {
+    return null;
+  }
+  return result;
 }

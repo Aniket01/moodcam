@@ -1,0 +1,28 @@
+description: Ultralytics YOLO11n-cls model trained on /content/yolo_dataset_root
+author: Ultralytics
+date: '2026-03-01T14:31:33.988057'
+version: 8.4.19
+license: AGPL-3.0 License (https://ultralytics.com/license)
+docs: https://docs.ultralytics.com
+stride: 1
+task: classify
+batch: 1
+imgsz:
+- 224
+- 224
+names:
+  0: Anger
+  1: Disgust
+  2: Fear
+  3: Happiness
+  4: Neutral
+  5: Sadness
+  6: Surprise
+args:
+  batch: 1
+  fraction: 1.0
+  half: false
+  int8: true
+  nms: false
+channels: 3
+end2end: false

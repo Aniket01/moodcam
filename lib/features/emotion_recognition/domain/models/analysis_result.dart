@@ -4,9 +4,6 @@ class AnalysisResult {
   /// Discrete emotion + confidence
   final EmotionResult emotion;
 
-  /// Continuous fatigue score 0 (alert) → 1 (very fatigued)
-  final double fatigueScore;
-
   /// Continuous stress score 0 (relaxed) → 1 (highly stressed)
   final double stressScore;
 
@@ -18,7 +15,6 @@ class AnalysisResult {
 
   const AnalysisResult({
     required this.emotion,
-    required this.fatigueScore,
     required this.stressScore,
     required this.isBaselineReady,
     this.metrics = const {},

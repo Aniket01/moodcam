@@ -162,7 +162,6 @@ class _CameraFERScreenState extends State<CameraFERScreen>
                 builder: (context, _) => _AnalysisOverlay(
                   faceDetected: _pipelineController.faceDetected,
                   analysis: _pipelineController.currentAnalysis,
-                  blendshapes: _pipelineController.currentBlendshapes,
                 ),
               ),
             ),
@@ -224,15 +223,10 @@ class _TopStatusChip extends StatelessWidget {
 // ─── Main analysis overlay ────────────────────────────────────────────────────
 
 class _AnalysisOverlay extends StatelessWidget {
-  const _AnalysisOverlay({
-    required this.faceDetected,
-    required this.analysis,
-    required this.blendshapes,
-  });
+  const _AnalysisOverlay({required this.faceDetected, required this.analysis});
 
   final bool faceDetected;
   final AnalysisResult? analysis;
-  final List<double> blendshapes;
 
   @override
   Widget build(BuildContext context) {
@@ -256,13 +250,6 @@ class _AnalysisOverlay extends StatelessWidget {
             const SizedBox(height: 10),
             _EmotionRow(analysis!),
             const SizedBox(height: 14),
-            _MarkerBar(
-              label: 'Fatigue',
-              emoji: '🥱',
-              value: analysis!.fatigueScore,
-              color: Colors.orangeAccent,
-            ),
-            const SizedBox(height: 8),
             _MarkerBar(
               label: 'Stress',
               emoji: '😤',
@@ -301,10 +288,8 @@ class _CalibrationBanner extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Estimate progress from windowLen (grows from 0 → baselineFrames)
     final windowLen = (analysis.metrics['windowLen'] ?? 0).toInt();
-    // baselineFrames default is 150
-    const int baselineFrames = 150;
+    const int baselineFrames = 10;
     final double progress = (windowLen / baselineFrames).clamp(0.0, 1.0);
 
     return Container(
@@ -470,12 +455,7 @@ class _DebugMetricsPanel extends StatelessWidget {
     final m = analysis.metrics;
     final rows = <MapEntry<String, String>>[
       MapEntry('EAR', (m['ear'] ?? 0).toStringAsFixed(3)),
-      MapEntry('relEAR', (m['relEAR'] ?? 0).toStringAsFixed(3)),
       MapEntry('MAR', (m['mar'] ?? 0).toStringAsFixed(3)),
-      MapEntry('relMAR', (m['relMAR'] ?? 0).toStringAsFixed(3)),
-      MapEntry('browFurrow', (m['browFurrow'] ?? 0).toStringAsFixed(3)),
-      MapEntry('smile', (m['smile'] ?? 0).toStringAsFixed(3)),
-      MapEntry('frown', (m['frown'] ?? 0).toStringAsFixed(3)),
       MapEntry('baseEAR', (m['baselineEAR'] ?? 0).toStringAsFixed(3)),
       MapEntry('baseMAR', (m['baselineMAR'] ?? 0).toStringAsFixed(3)),
       MapEntry('win', '${(m['windowLen'] ?? 0).toInt()} fr'),
