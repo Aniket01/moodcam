@@ -7,8 +7,6 @@ import '../../domain/models/analysis_result.dart';
 import '../../domain/models/basic_emotion.dart';
 import '../state/pipeline_controller.dart';
 
-// ─── Emotion display helpers ──────────────────────────────────────────────────
-
 /// Emoji for each basic emotion.
 String _emotionEmoji(BasicEmotion e) {
   switch (e) {
@@ -49,7 +47,7 @@ Color _emotionColor(BasicEmotion e) {
   }
 }
 
-// ─── Screen ───────────────────────────────────────────────────────────────────
+// Screen
 
 class CameraFERScreen extends StatefulWidget {
   const CameraFERScreen({super.key});
@@ -112,7 +110,7 @@ class _CameraFERScreenState extends State<CameraFERScreen>
     }
   }
 
-  // ─── Build ─────────────────────────────────────────────────────────────────
+  // Build
 
   @override
   Widget build(BuildContext context) {
@@ -172,7 +170,7 @@ class _CameraFERScreenState extends State<CameraFERScreen>
   }
 }
 
-// ─── Top status chip ──────────────────────────────────────────────────────────
+// Top status chip
 
 class _TopStatusChip extends StatelessWidget {
   const _TopStatusChip({required this.fps, required this.faceDetected});
@@ -220,7 +218,7 @@ class _TopStatusChip extends StatelessWidget {
   }
 }
 
-// ─── Main analysis overlay ────────────────────────────────────────────────────
+// Main analysis overlay
 
 class _AnalysisOverlay extends StatelessWidget {
   const _AnalysisOverlay({required this.faceDetected, required this.analysis});
@@ -268,7 +266,7 @@ class _AnalysisOverlay extends StatelessWidget {
   }
 }
 
-// ─── Sub-widgets ──────────────────────────────────────────────────────────────
+// Sub-widgets
 
 class _NoFaceRow extends StatelessWidget {
   @override
@@ -340,7 +338,7 @@ class _EmotionRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final emotion = analysis.emotion.emotion;
-    final confidence = analysis.emotion.confidence;
+    // final confidence = analysis.emotion.confidence;
     final color = _emotionColor(emotion);
 
     return Row(
@@ -359,32 +357,6 @@ class _EmotionRow extends StatelessWidget {
                   fontWeight: FontWeight.bold,
                   letterSpacing: 1.5,
                 ),
-              ),
-              const SizedBox(height: 4),
-              // Confidence bar
-              Row(
-                children: [
-                  Expanded(
-                    child: ClipRRect(
-                      borderRadius: BorderRadius.circular(4),
-                      child: LinearProgressIndicator(
-                        value: confidence,
-                        minHeight: 6,
-                        backgroundColor: Colors.white12,
-                        color: color,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  Text(
-                    '${(confidence * 100).toStringAsFixed(0)}%',
-                    style: TextStyle(
-                      color: color,
-                      fontSize: 12,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ],
               ),
             ],
           ),
@@ -445,7 +417,7 @@ class _MarkerBar extends StatelessWidget {
   }
 }
 
-/// Expanded debug metrics table — only compiled and displayed in debug mode.
+/// Debug metrics table
 class _DebugMetricsPanel extends StatelessWidget {
   const _DebugMetricsPanel(this.analysis);
   final AnalysisResult analysis;

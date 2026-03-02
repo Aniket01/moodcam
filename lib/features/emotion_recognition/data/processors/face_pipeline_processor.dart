@@ -29,6 +29,7 @@ class IsolateFrameData {
   final int width;
   final int height;
   final ImageFormatGroup format;
+  final int sensorOrientation;
 
   // Face bounding box & landmarks
   final Rect boundingBox;
@@ -41,6 +42,7 @@ class IsolateFrameData {
     required this.width,
     required this.height,
     required this.format,
+    required this.sensorOrientation,
     required this.boundingBox,
     required this.landmarks478,
   });
@@ -135,7 +137,7 @@ class FacePipelineProcessor {
     _isProcessing = true;
 
     try {
-      // Convert CameraImage → InputImage (NV21)
+      // Convert CameraImage to InputImage (NV21)
       final inputImage = _toInputImage(image, camera);
       if (inputImage == null) {
         _isProcessing = false;
@@ -199,6 +201,7 @@ class FacePipelineProcessor {
         width: imgW,
         height: imgH,
         format: image.format.group,
+        sensorOrientation: camera.sensorOrientation,
         boundingBox: mesh.boundingBox,
         landmarks478: all478,
       );
@@ -243,7 +246,7 @@ class FacePipelineProcessor {
     all478[startIdx + 4] = [cx, cy + ry];
   }
 
-  /// Convert YUV420 to NV21
+  /// Convert YUV420 -> NV21
   InputImage? _toInputImage(CameraImage image, CameraDescription camera) {
     final rotation = InputImageRotationValue.fromRawValue(
       camera.sensorOrientation,
@@ -322,37 +325,113 @@ void _tfliteIsolateEntry(IsolateInitData initData) {
 
         // FER Model Inference
         List<double> ferEmotions = List<double>.filled(7, 0.0);
-        final croppedImg = _cropAndConvertFaceToImageIso(message);
+        img.Image? croppedImg = _cropAndConvertFaceToImageIso(message);
 
         if (croppedImg != null) {
+          // Rotate if necessary to make face upright
+          if (message.sensorOrientation != 0) {
+            croppedImg = img.copyRotate(
+              croppedImg,
+              angle: message.sensorOrientation,
+            );
+          }
+
           final img.Image resizedImg = img.copyResize(
             croppedImg,
             width: 224,
             height: 224,
           );
 
-          // Int8 quantized model: raw uint8 pixel values (0–255)
-          final input = Uint8List(1 * 224 * 224 * 3);
-          int pixelIndex = 0;
-          for (int y = 0; y < 224; y++) {
-            for (int x = 0; x < 224; x++) {
-              final pixel = resizedImg.getPixel(x, y);
-              input[pixelIndex++] = pixel.r.toInt().clamp(0, 255);
-              input[pixelIndex++] = pixel.g.toInt().clamp(0, 255);
-              input[pixelIndex++] = pixel.b.toInt().clamp(0, 255);
+          final dynamic inTensor = ferInterpreter?.getInputTensor(0);
+          final String inTypeStr = inTensor?.type?.toString() ?? '';
+          final bool inIsFloat = inTypeStr.toLowerCase().contains('float');
+          double inScale = 0.0;
+          int inZp = 0;
+          try {
+            final dynamic inQp = inTensor?.quantizationParams;
+            if (inQp != null) {
+              inScale = (inQp.scale as num).toDouble();
+              inZp = (inQp.zeroPoint as num).toInt();
+            }
+          } catch (_) {}
+
+          final dynamic outTensor = ferInterpreter?.getOutputTensor(0);
+          final String outTypeStr = outTensor?.type?.toString() ?? '';
+          final bool outIsInt = outTypeStr.toLowerCase().contains('int');
+          double outScale = 0.0;
+          int outZp = 0;
+          try {
+            final dynamic outQp = outTensor?.quantizationParams;
+            if (outQp != null) {
+              outScale = (outQp.scale as num).toDouble();
+              outZp = (outQp.zeroPoint as num).toInt();
+            }
+          } catch (_) {}
+
+          // Build input as nested List so tflite_flutter receives the expected shape ([1, H, W, C]).
+          final List inputBuffer = List.generate(1, (_) {
+            return List.generate(224, (yy) {
+              return List.generate(224, (xx) {
+                final dynamic pix = resizedImg.getPixel(xx, yy);
+                int r = 0, g = 0, b = 0;
+                if (pix is int) {
+                  r = (pix >> 16) & 0xFF;
+                  g = (pix >> 8) & 0xFF;
+                  b = pix & 0xFF;
+                } else {
+                  final dynamic p = pix;
+                  r = ((p.r ?? 0) as num).toInt();
+                  g = ((p.g ?? 0) as num).toInt();
+                  b = ((p.b ?? 0) as num).toInt();
+                }
+                r = r.clamp(0, 255);
+                g = g.clamp(0, 255);
+                b = b.clamp(0, 255);
+
+                if (inIsFloat) {
+                  // Normalize to [0, 1]
+                  return [r / 255.0, g / 255.0, b / 255.0];
+                } else {
+                  if (inScale > 0.0) {
+                    // Quantize based on scale and zeroPoint
+                    int qr = ((r / inScale) + inZp).round();
+                    int qg = ((g / inScale) + inZp).round();
+                    int qb = ((b / inScale) + inZp).round();
+                    return [qr, qg, qb];
+                  } else {
+                    return [r, g, b];
+                  }
+                }
+              });
+            });
+          });
+
+          // Allocate output buffer matching the interpreter's expected output type.
+          final dynamic rawOutput = outIsInt
+              ? List.generate(1, (_) => List<int>.filled(7, 0))
+              : List.generate(1, (_) => List<double>.filled(7, 0.0));
+
+          ferInterpreter?.run(inputBuffer, rawOutput);
+
+          // Extract and dequantize logits
+          List<double> logits = List<double>.filled(7, 0.0);
+          if (outIsInt) {
+            for (int i = 0; i < 7; i++) {
+              double val = (rawOutput[0][i] as num).toDouble();
+              if (outScale > 0.0) {
+                logits[i] = (val - outZp) * outScale;
+              } else {
+                logits[i] = val;
+              }
+            }
+          } else {
+            for (int i = 0; i < 7; i++) {
+              logits[i] = (rawOutput[0][i] as num).toDouble();
             }
           }
 
-          // tflite_flutter auto-dequantizes int8 output → doubles
-          // Use List<double> directly and apply softmax over the logits
-          final rawOutput = List.generate(
-            1,
-            (_) => List<double>.filled(7, 0.0),
-          );
-          ferInterpreter!.run(input.reshape([1, 224, 224, 3]), rawOutput);
-
           // Apply softmax to get probabilities
-          ferEmotions = _softmax(rawOutput[0]);
+          ferEmotions = _softmax(logits);
         }
 
         sendPort.send(IsolateResultData(ferEmotions, imgW, imgH, all478));
@@ -364,7 +443,7 @@ void _tfliteIsolateEntry(IsolateInitData initData) {
   });
 }
 
-/// Softmax: convert raw logits → probabilities that sum to 1.0
+/// Softmax: convert raw logits -> probabilities that sum to 1.0
 List<double> _softmax(List<double> logits) {
   final double maxLogit = logits.reduce(math.max);
   final List<double> exps = logits.map((v) => math.exp(v - maxLogit)).toList();
@@ -374,11 +453,40 @@ List<double> _softmax(List<double> logits) {
 
 // Isolate helper: crop face region from raw plane bytes
 img.Image? _cropAndConvertFaceToImageIso(IsolateFrameData data) {
-  final bbox = data.boundingBox;
-  int startX = math.max(0, bbox.left.floor().clamp(0, data.width - 1));
-  int startY = math.max(0, bbox.top.floor().clamp(0, data.height - 1));
-  int endX = math.min(data.width, bbox.right.ceil().clamp(0, data.width));
-  int endY = math.min(data.height, bbox.bottom.ceil().clamp(0, data.height));
+  int rot = data.sensorOrientation;
+  int rawW = data.width;
+  int rawH = data.height;
+
+  final Rect bbox = data.boundingBox;
+  List<math.Point<int>> corners = [
+    math.Point(bbox.left.floor(), bbox.top.floor()),
+    math.Point(bbox.right.ceil(), bbox.top.floor()),
+    math.Point(bbox.right.ceil(), bbox.bottom.ceil()),
+    math.Point(bbox.left.floor(), bbox.bottom.ceil()),
+  ];
+
+  List<math.Point<int>> rawCorners = corners.map((p) {
+    int x = p.x;
+    int y = p.y;
+    if (rot == 90) {
+      return math.Point(y, rawH - 1 - x);
+    } else if (rot == 270) {
+      return math.Point(rawW - 1 - y, x);
+    } else if (rot == 180) {
+      return math.Point(rawW - 1 - x, rawH - 1 - y);
+    }
+    return p;
+  }).toList();
+
+  int minX = rawCorners.map((p) => p.x).reduce(math.min);
+  int maxX = rawCorners.map((p) => p.x).reduce(math.max);
+  int minY = rawCorners.map((p) => p.y).reduce(math.min);
+  int maxY = rawCorners.map((p) => p.y).reduce(math.max);
+
+  int startX = math.max(0, minX.clamp(0, rawW - 1));
+  int startY = math.max(0, minY.clamp(0, rawH - 1));
+  int endX = math.min(rawW, maxX.clamp(0, rawW));
+  int endY = math.min(rawH, maxY.clamp(0, rawH));
   int cropW = endX - startX;
   int cropH = endY - startY;
 

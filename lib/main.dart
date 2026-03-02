@@ -3,10 +3,8 @@ import 'package:flutter/services.dart';
 import 'features/emotion_recognition/presentation/screens/camera_fer_screen.dart';
 
 void main() {
-  // Ensure the native bridge is initialized before using the camera
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Lock app to portrait mode
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.portraitUp,
     DeviceOrientation.portraitDown,

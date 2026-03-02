@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+// Use this to prompt user to bring face closer to screen
+// the use screen flash to get correct reading in bad lighting.
+
 class FaceGuidePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
