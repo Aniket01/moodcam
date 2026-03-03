@@ -159,9 +159,9 @@ class FaceAnalysisEngine {
     debugPrint('🔄 FaceAnalysisEngine baseline reset');
   }
 
-  // ═══════════════════════════════════════════════════════════════════════
+  // =======================================================================
   //  EMOTION CLASSIFIER (Custom FER Model)
-  // ═══════════════════════════════════════════════════════════════════════
+  // =======================================================================
 
   EmotionResult _classifyFEREmotion(List<double> ferEmotions) {
     if (ferEmotions.length != 7) {
