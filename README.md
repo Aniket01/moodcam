@@ -12,14 +12,14 @@
 
 ## How it Works: The Recognition Pipeline
 
-Moodcam uses a highly-optimized multi-stage pipeline combining ML Kit and a fine-tuned YOLOv11 cls model trained on FER2025 dataset.
+Moodcam uses a highly-optimized multi-stage pipeline combining ML Kit and a fine-tuned YOLOv11 cls model trained on [FER2025 dataset](https://www.kaggle.com/datasets/shaikhborhanuddin/fer-25).
 
-1.  **Camera Feed (`CameraService`)**: Captures real-time frames from the front-facing camera in YUV420 format.
+1.  **Camera Feed (`CameraService`)**: Captures real-time frames from the front-facing camera in YUV420 format(Android standard).
 2.  **Face Mesh Detection (`Google ML Kit`)**: The `FacePipelineProcessor` passes frames to ML Kit to extract a high-fidelity 468-point face mesh. 10 iris tracking points are synthesized to increase accuracy to 478 points.
 3.  **Background Inference (Dart Isolate)**: 
     *   To prevent UI stutter, the heavy lifting occurs in a background thread (Isolate).
     *   The face is cropped and converted to RGB on the fly.
-    *   A custom INT8 Quantized YOLOv11 cls tflite model analyzes the face to generate probabilities for 7 core emotions.
+    *   A custom YOLOv11 image classification tflite model analyzes the face to generate probabilities for 7 core emotions.
 4.  **Advanced Metrics & Stress Score (`FaceAnalysisEngine`)**:
     *   Calculates geometric facial features: **EAR** (Eye Aspect Ratio) and **MAR** (Mouth Aspect Ratio).
     *   Maintains a rolling 6-second window to calibrate a personal baseline for the user.
