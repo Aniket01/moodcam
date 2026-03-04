@@ -1,6 +1,6 @@
 # Moodcam
 
-**Moodcam** is a powerful, offline-first Flutter application designed for real-time facial emotion recognition and stress/fatigue analysis. By entirely running on-device inference, Moodcam protects user privacy while delivering high frame rates and maintaining seamless performance.
+**Moodcam** is a powerful, offline-first Flutter application designed for real-time facial emotion recognition and stress/fatigue analysis. By entirely running on-device inference, Moodcam protects user privacy while delivering high frame rates and maintaining seamless performance in any lighting condition.
 
 ## Key Features
 
@@ -8,7 +8,7 @@
 *   **Real-Time Emotion Recognition:** Detects up to 7 basic emotions (Happy, Sad, Angry, Surprised, Fearful, Disgusted, Neutral) continuously.
 *   **Stress & Fatigue Analysis:** Computes a personalized, dynamic stress score based on advanced physiological markers (negative emotion persistence, blinking, PERCLOS, yawning, and squinting).
 *   **Background Processing Engine:** Utilizes Dart Isolates to run intensive TFLite models completely off the main UI thread, guaranteeing zero jank and a smooth 60fps UI.
-*   **Adaptive Environment (Coming Soon):** Adaptive screen flash to maintain analysis accuracy in low-light environments.
+*   **Adaptive Environment :** Adaptive screen flash to maintain analysis accuracy in low-light environments.
 
 ## How it Works: The Recognition Pipeline
 
@@ -19,12 +19,14 @@ Moodcam uses a highly-optimized multi-stage pipeline combining ML Kit and a fine
 3.  **Background Inference (Dart Isolate)**: 
     *   To prevent UI stutter, the heavy lifting occurs in a background thread (Isolate).
     *   The face is cropped and converted to RGB on the fly.
-    *   A custom YOLOv11 image classification tflite model analyzes the face to generate probabilities for 7 core emotions.
-4.  **Advanced Metrics & Stress Score (`FaceAnalysisEngine`)**:
+    *   Luminance is calculated to detect low-light environment
+    *   YOLOv11 image classification model trained on latest dataset analyzes the face to generate probabilities for 7 core emotions.
+4.  **Smart Selfie Flash (Low Light Mode)**: Automatic screen brightness and flash adjustments based on environment luminosity to maintain continuous facial tracking.
+5.  **Advanced Metrics & Stress Score (`FaceAnalysisEngine`)**:
     *   Calculates geometric facial features: **EAR** (Eye Aspect Ratio) and **MAR** (Mouth Aspect Ratio).
     *   Maintains a rolling 6-second window to calibrate a personal baseline for the user.
     *   Calculates a final **Stress Score** (0-100%) by weighting markers like sustained negative emotion, eye tension (squinting), PERCLOS (drowsiness), and yawn spikes.
-5.  **UI & Visualization (`CameraFERScreen`)**: Receives the calculated data and renders it beautifully. Displays the current FPS, the recognized emotion (with emojis and color accents), and a progress bar representing the real-time stress score.
+6.  **UI & Visualization (`CameraFERScreen`)**: Receives the calculated data and renders it beautifully. Displays the current FPS, the recognized emotion (with emojis and color accents), and a progress bar representing the real-time stress score.
 
 ## Architecture
 
@@ -37,5 +39,5 @@ Moodcam embraces a **Feature-First** architecture, ensuring modularity and scala
 
 ## Future Roadmap
 
-*   **Low Light Mode:** Automatic screen brightness/flash adjustments based on environment luminosity to maintain continuous facial tracking.
+*   **Improve Stress monitoring** Currently, the timeframe for calibrating and the rolling window of 6 seconds is not enough for accurate stress monitoring. For better reading, historical data needs to be maintained. I intend to soon add persistent storage (of course offline only) to get more reliable analytics with usage.
 *   **Historical Timeline:** A dashboard logging daily emotional trends and stress peaks.
