@@ -53,12 +53,14 @@ class IsolateResultData {
   final int imageWidth;
   final int imageHeight;
   final List<List<double>> landmarks478;
+  final double luminance;
 
   IsolateResultData(
     this.ferEmotions,
     this.imageWidth,
     this.imageHeight,
     this.landmarks478,
+    this.luminance,
   );
 }
 
@@ -77,6 +79,7 @@ class FacePipelineProcessor {
     List<List<double>> landmarks,
     int imageWidth,
     int imageHeight,
+    double luminance,
   )?
   onAnalysisResult;
 
@@ -124,6 +127,7 @@ class FacePipelineProcessor {
         message.landmarks478,
         message.imageWidth,
         message.imageHeight,
+        message.luminance,
       );
     } else if (message == "ERROR") {
       _isProcessing = false;
@@ -326,6 +330,7 @@ void _tfliteIsolateEntry(IsolateInitData initData) {
         // FER Model Inference
         List<double> ferEmotions = List<double>.filled(7, 0.0);
         img.Image? croppedImg = _cropAndConvertFaceToImageIso(message);
+        double luminance = 0.0;
 
         if (croppedImg != null) {
           // Rotate if necessary to make face upright
@@ -368,12 +373,17 @@ void _tfliteIsolateEntry(IsolateInitData initData) {
             }
           } catch (_) {}
 
+          // Initialize our luminance accumulator
+          double sumLum = 0.0;
+
           // Build input as nested List so tflite_flutter receives the expected shape ([1, H, W, C]).
           final List inputBuffer = List.generate(1, (_) {
             return List.generate(224, (yy) {
               return List.generate(224, (xx) {
                 final dynamic pix = resizedImg.getPixel(xx, yy);
                 int r = 0, g = 0, b = 0;
+
+                // Safely handle both v3 and v4 of the 'image' package
                 if (pix is int) {
                   r = (pix >> 16) & 0xFF;
                   g = (pix >> 8) & 0xFF;
@@ -384,9 +394,13 @@ void _tfliteIsolateEntry(IsolateInitData initData) {
                   g = ((p.g ?? 0) as num).toInt();
                   b = ((p.b ?? 0) as num).toInt();
                 }
+
                 r = r.clamp(0, 255);
                 g = g.clamp(0, 255);
                 b = b.clamp(0, 255);
+
+                // CALCULATE LUMINANCE (Y = 0.299R + 0.587G + 0.114B)
+                sumLum += (0.299 * r) + (0.587 * g) + (0.114 * b);
 
                 if (inIsFloat) {
                   // Normalize to [0, 1]
@@ -405,6 +419,9 @@ void _tfliteIsolateEntry(IsolateInitData initData) {
               });
             });
           });
+
+          // Finalize luminance average
+          luminance = sumLum / (224 * 224);
 
           // Allocate output buffer matching the interpreter's expected output type.
           final dynamic rawOutput = outIsInt
@@ -434,7 +451,11 @@ void _tfliteIsolateEntry(IsolateInitData initData) {
           ferEmotions = _softmax(logits);
         }
 
-        sendPort.send(IsolateResultData(ferEmotions, imgW, imgH, all478));
+        // (Luminance calculation is now integrated into the FER input buffer loop)
+
+        sendPort.send(
+          IsolateResultData(ferEmotions, imgW, imgH, all478, luminance),
+        );
       } catch (e) {
         debugPrint('[Isolate] ❌ Inference error: $e');
         sendPort.send("ERROR");

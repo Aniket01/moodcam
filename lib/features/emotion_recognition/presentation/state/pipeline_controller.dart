@@ -21,12 +21,22 @@ class PipelineController extends ChangeNotifier {
   double currentFps = 0.0;
   bool faceDetected = false;
 
+  /// Latest measured average luminance (0-255) for the current face crop.
+  double currentLuminosity = 0.0;
+
+  bool _isLowLight = false;
+  bool get isLowLight => _isLowLight;
+  int _lowLightCounter = 0;
+  static const double _lowLightOnThreshold = 40.0;
+  static const double _lowLightOffThreshold = 140.0;
+  static const int _lowLightFrameThreshold = 3;
+
   /// Latest analysis result from the engine; null before the first face frame.
   AnalysisResult? currentAnalysis;
 
   PipelineController(this._cameraService) {
     _facePipelineProcessor = FacePipelineProcessor(
-      onAnalysisResult: (ferEmotions, landmarks, imgW, imgH) {
+      onAnalysisResult: (ferEmotions, landmarks, imgW, imgH, luminance) {
         try {
           final result = _analysisEngine.analyze(
             ferEmotions: ferEmotions,
@@ -37,11 +47,35 @@ class PipelineController extends ChangeNotifier {
           currentAnalysis = result;
           faceDetected = true;
 
+          // EMA smoothing
+          if (currentLuminosity == 0.0) {
+            // for the very first fram
+            currentLuminosity = luminance;
+          } else {
+            // Smooth out noisy fluctuations
+            currentLuminosity = (currentLuminosity * 0.8) + (luminance * 0.2);
+          }
+
+          // hysteresis and frame counting
+          if (currentLuminosity < _lowLightOnThreshold) {
+            _lowLightCounter++;
+            if (_lowLightCounter >= _lowLightFrameThreshold) _isLowLight = true;
+          } else {
+            // always reset the counter if above the ON threshold
+            _lowLightCounter = 0;
+
+            // only turn off flash if Y > 140
+            if (currentLuminosity > _lowLightOffThreshold) {
+              _isLowLight = false;
+            }
+          }
+
           debugPrint(
             '[Controller] 🎭 Analysis — '
             'emotion: ${result.emotion}, '
             'stress: ${result.stressScore.toStringAsFixed(3)}, '
-            'baseline: ${result.isBaselineReady ? "ready" : "calibrating"}',
+            'baseline: ${result.isBaselineReady ? "ready" : "calibrating"}, '
+            'lum: ${currentLuminosity.toStringAsFixed(2)}',
           );
         } catch (e, stack) {
           debugPrint(
@@ -58,6 +92,9 @@ class PipelineController extends ChangeNotifier {
         }
         faceDetected = false;
         currentAnalysis = null;
+        _isLowLight = false;
+        _lowLightCounter = 0;
+        currentLuminosity = 0;
         notifyListeners();
       },
     );

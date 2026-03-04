@@ -1,6 +1,7 @@
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import '../widgets/smart_selfie_flash.dart';
 
 import '../../data/services/camera_service.dart';
 import '../../domain/models/analysis_result.dart';
@@ -133,7 +134,15 @@ class _CameraFERScreenState extends State<CameraFERScreen>
             Center(
               child: AspectRatio(
                 aspectRatio: 1 / controller.value.aspectRatio,
-                child: CameraPreview(controller),
+                child: ListenableBuilder(
+                  listenable: _pipelineController,
+                  builder: (context, _) {
+                    return SmartSelfieFlash(
+                      isLowLight: _pipelineController.isLowLight,
+                      cameraPreview: CameraPreview(controller),
+                    );
+                  },
+                ),
               ),
             ),
 
