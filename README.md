@@ -15,7 +15,9 @@
 Moodcam uses a highly-optimized multi-stage pipeline combining ML Kit and a fine-tuned YOLOv11 cls model trained on [FER2025 dataset](https://www.kaggle.com/datasets/shaikhborhanuddin/fer-25).
 
 1.  **Camera Feed (`CameraService`)**: Captures real-time frames from the front-facing camera in YUV420 format(Android standard).
-2.  **Face Mesh Detection (`Google ML Kit`)**: The `FacePipelineProcessor` passes frames to ML Kit to extract a high-fidelity 468-point face mesh. 10 iris tracking points are synthesized to increase accuracy to 478 points.
+2.  **Face Mesh Detection (`Google ML Kit`)**: 
+    *   The `FacePipelineProcessor` passes frames to ML Kit to extract a high-fidelity 468-point face mesh.
+    *   10 iris tracking points synthesized to increase accuracy to 478 points to feed into Blendshape model to derive 52 blendshapes that point to facial muscle activations.
 3.  **Background Inference (Dart Isolate)**: 
     *   To prevent UI stutter, the heavy lifting occurs in a background thread (Isolate).
     *   The face is cropped and converted to RGB on the fly.
@@ -24,7 +26,7 @@ Moodcam uses a highly-optimized multi-stage pipeline combining ML Kit and a fine
 4.  **Smart Selfie Flash (Low Light Mode)**: Automatic screen brightness and flash adjustments based on environment luminosity to maintain continuous facial tracking.
 5.  **Advanced Metrics & Stress Score (`FaceAnalysisEngine`)**:
     *   Calculates geometric facial features: **EAR** (Eye Aspect Ratio) and **MAR** (Mouth Aspect Ratio).
-    *   Maintains a rolling 6-second window to calibrate a personal baseline for the user.
+    *   Maintains a 6-second window to calibrate a dynamic rolling baseline for the user.
     *   Calculates a final **Stress Score** (0-100%) by weighting markers like sustained negative emotion, eye tension (squinting), PERCLOS (drowsiness), and yawn spikes.
 6.  **UI & Visualization (`CameraFERScreen`)**: Receives the calculated data and renders it beautifully. Displays the current FPS, the recognized emotion (with emojis and color accents), and a progress bar representing the real-time stress score.
 
@@ -32,9 +34,9 @@ Moodcam uses a highly-optimized multi-stage pipeline combining ML Kit and a fine
 
 Moodcam embraces a **Feature-First** architecture, ensuring modularity and scalability:
 
-*   **`lib/features/emotion_recognition/data`**: Contains the external API wrappers (`CameraService`), Isolate management (`FacePipelineProcessor`), and the core analytics engine (`FaceAnalysisEngine`).
-*   **`lib/features/emotion_recognition/domain`**: Contains the pure data models (`BasicEmotion`, `AnalysisResult`, `EmotionResult`).
-*   **`lib/features/emotion_recognition/presentation`**: The reactive UI built with Flutter's `ChangeNotifier` (`PipelineController`) separating state from logic.
+*   **`lib/features/emotion_recognition/data`**: Contains the camera service, Isolate management, and the core analytics engine.
+*   **`lib/features/emotion_recognition/domain`**: Contains the pure data models.
+*   **`lib/features/emotion_recognition/presentation`**: Widgets, State Management and Views.
 *   **`lib/core/constants`**: Houses mathematical constants, specifically facial landmark indices for EAR and MAR calculations.
 
 ## Future Roadmap
