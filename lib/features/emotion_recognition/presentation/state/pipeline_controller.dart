@@ -28,7 +28,7 @@ class PipelineController extends ChangeNotifier {
   bool get isLowLight => _isLowLight;
   int _lowLightCounter = 0;
   static const double _lowLightOnThreshold = 40.0;
-  static const double _lowLightOffThreshold = 140.0;
+  static const double _lowLightOffThreshold = 100.0;
   static const int _lowLightFrameThreshold = 3;
 
   /// Latest analysis result from the engine; null before the first face frame.
@@ -64,7 +64,7 @@ class PipelineController extends ChangeNotifier {
             // always reset the counter if above the ON threshold
             _lowLightCounter = 0;
 
-            // only turn off flash if Y > 140
+            // only turn off flash if Y > 100
             if (currentLuminosity > _lowLightOffThreshold) {
               _isLowLight = false;
             }

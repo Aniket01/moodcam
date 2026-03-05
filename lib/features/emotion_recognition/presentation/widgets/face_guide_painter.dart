@@ -13,8 +13,8 @@ class FaceGuidePainter extends CustomPainter {
     ); // Slightly above center
     final ovalRect = Rect.fromCenter(
       center: center,
-      width: size.width * 0.7, // 70% of screen width
-      height: size.height * 0.45, // 45% of screen height
+      width: size.width * 0.8, // 70% of screen width
+      height: size.height * 0.5, // 45% of screen height
     );
 
     // Setup paths

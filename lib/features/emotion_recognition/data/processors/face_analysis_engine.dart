@@ -91,8 +91,6 @@ class FaceAnalysisEngine {
   //    Rolling window
   final Queue<_FrameSnapshot> _window = Queue();
 
-  //    Public API
-
   /// Feed each pipeline frame into the engine.
   ///
   /// [ferEmotions] - 7 floats from FER model
@@ -112,7 +110,7 @@ class FaceAnalysisEngine {
     final double ear = (earL + earR) / 2.0;
     final double mar = _computeMAR(landmarks, LM.mouthMAR);
 
-    // Baseline calibration (fast — only ~1s)
+    // Baseline calibration and dynamic adaptation
     if (!isBaselineReady) {
       _baselineEARSamples.add(ear);
       _baselineMARSamples.add(mar);
@@ -124,6 +122,12 @@ class FaceAnalysisEngine {
           'MAR: ${_baselineMAR.toStringAsFixed(3)}',
         );
       }
+    } else {
+      // Dynamic rolling baseline: Slowly adapt to the user's natural resting face
+      // Exponential Moving Average
+      const double alpha = 0.005;
+      _baselineEAR = (alpha * ear) + ((1.0 - alpha) * _baselineEAR);
+      _baselineMAR = (alpha * mar) + ((1.0 - alpha) * _baselineMAR);
     }
 
     // Emotion classification from FER model
@@ -249,7 +253,8 @@ class FaceAnalysisEngine {
     final double yawnScore = _clamp01(yawnFrames / (yawnEquivalentFrames + 1));
 
     //  High blink rate
-    final double blinkRate = _countBlinkEvents(snaps) / (n / fps);
+    final double blinkRate =
+        _countBlinkEvents(snaps) / (math.max(n / fps, 1.0));
     const double stressBlinkRate = 0.50;
     final double blinkSurge = _clamp01(blinkRate / stressBlinkRate);
 
@@ -261,12 +266,11 @@ class FaceAnalysisEngine {
         0.10 * yawnScore +
         0.10 * blinkSurge;
 
-    return _clamp01(_sigmoid(raw, gain: 8.0, mid: 0.25));
+    // Softened sigmoid: mid shifted to 0.45, gain reduced to 5.0
+    return _clamp01(_sigmoid(raw, gain: 5.0, mid: 0.45));
   }
 
   //  HELPERS
-  // ================================================================
-
   int _countBlinkEvents(List<_FrameSnapshot> snaps) {
     final double closeThreshold = _baselineEAR * 0.65;
     final double openThreshold = _baselineEAR * 0.85;
