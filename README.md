@@ -30,6 +30,9 @@ Moodcam uses a highly-optimized multi-stage pipeline combining ML Kit and a fine
     *   Calculates a final **Stress Score** (0-100%) by weighting markers like sustained negative emotion, eye tension (squinting), PERCLOS (drowsiness), and yawn spikes.
 6.  **UI & Visualization (`CameraFERScreen`)**: Receives the calculated data and renders it beautifully. Displays the current FPS, the recognized emotion (with emojis and color accents), and a progress bar representing the real-time stress score.
 
+## Watch the Demo
+[![MoodCam Demo](https://img.youtube.com/vi/XzG3TopurRc/0.jpg)](https://www.youtube.com/watch?v=XzG3TopurRc)
+
 ## Architecture
 
 Moodcam embraces a **Feature-First** architecture, ensuring modularity and scalability:
